@@ -11,8 +11,8 @@ def main():
 @app.route("/playlists")
 def show_playlists():
 	if token:
-		playlists = get_playlists('Spotify')
-		playlist_dict = []
-		for playlist in playlists:
-			playlist_dict.append(get_playlist_tracks(playlist['playlist_owner_id'], playlist['playlist_uri'], playlist['playlist_name']))
+		cursor = con.cursor()
+		cursor.execute("""
+			SELECT song_id FROM 
+			""")
 		return render_template('index.html', playlists=names)
