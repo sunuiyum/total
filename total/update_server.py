@@ -33,13 +33,105 @@ client = soundcloud.Client(
 	)
 
 def clean_string(string):
-	regex = re.compile("\s*\(?\[?[Ff]eat\.", flags=re.I)
+	regex = re.compile("\s*\(?\[?([Ff](ea)?t)(\.)?", flags=re.I)
 	test = regex.split(string)[0]
-	word_blacklist = [' - Radio Edit', '(Radio Edit)', '(Original Mix)', ' - Original Mix', '(Radio Mix)', ' - Original Mix']
+	regex = re.compile("\s*\(?\[?\s*[Pp]rod(uced by)?\.?", flags=re.I)
+	test = regex.split(test)[0]
+	regex = re.compile("(\s*\|)", flags=re.I)
+	test = regex.split(test)[0]
+	regex = re.compile("[Ww](ith)*\/", flags=re.I)
+	test = regex.split(test)[0]
+	regex = re.compile("Music Video", flags=re.I)
+	test = regex.split(test)[0]
+	word_blacklist = [' - Radio Edit', '(Radio Edit)', '(Original Mix)', ' - Original Mix', '(Radio Mix)', ' - Original Mix', ' [EARMILK Exclusive]', ' [DJBooth Premiere]', ' [EXPLICIT]', '(Video Link in Bio)', ' (Dirty)', ' [Unreleased]', ' (Explicit)', ' [Free D/L', ' - Directors Cut', ' [Thissongissick.com Premiere]', ' [Premiere]', ' // VIDEO IN DESCRIPTION', ' (Dirty)', ' (Explicit)', ' (Premiered on BBC Radio 1)']
 	for word in word_blacklist:
 		if word in test:
-			test = test.strip(word)
+			test = test.replace(word, '')
 	return test
+
+def extract_song(song):
+	song = titlecase(clean_string(unidecode(song)))
+	if '"' in song:
+		quoted = re.compile('"[^"]*"')
+		for value in quoted.findall(song):
+			return value.strip('"')
+	elif '\'' in song:
+		quoted = re.compile('\'[^"]*\'')
+		for value in quoted.findall(song):
+			return value.strip('\'')
+	elif 'RMX' in song:
+		song.replace('RMX', 'Remix')
+		return song
+	elif ' - ' in song:
+		dash = re.compile('\s*(\-)\s*')
+		test = dash.split(song)
+		test.remove('-')
+		cursor = con.cursor()
+		cursor.execute("""
+			SELECT artist FROM song_database
+			""")
+		artist_list = list(cursor.fetchall())
+		for x in range(0, len(artist_list)):
+			artist_list[x] = artist_list[x][0]
+		cursor.execute("""
+			SELECT artist FROM blacklist
+			""")
+		blacklist = list(cursor.fetchall())
+		for x in range(0, len(blacklist)):
+			blacklist[x] = blacklist[x][0]
+		for item in test:
+			if any(s in item for s in artist_list):
+				test.remove(item)
+			elif any(s in item for s in blacklist):
+				test.remove(item)
+		if len(test) == 1:
+			return test[0]
+		else:
+			return song
+	elif ' ~ ' in song:
+		dash = re.compile('\s*(\~)\s*')
+		test = dash.split(song)
+		test.remove('~')
+		cursor = con.cursor()
+		cursor.execute("""
+			SELECT artist FROM song_database
+			""")
+		artist_list = list(cursor.fetchall())
+		for x in range(0, len(artist_list)):
+			artist_list[x] = artist_list[x][0]
+		cursor.execute("""
+			SELECT artist FROM blacklist
+			""")
+		blacklist = list(cursor.fetchall())
+		for x in range(0, len(blacklist)):
+			blacklist[x] = blacklist[x][0]
+		for item in test:
+			if any(s in item for s in artist_list):
+				test.remove(item)
+			elif any(s in item for s in blacklist):
+				test.remove(item)
+		if len(test) == 1:
+			return test[0]
+		else:
+			return song
+	else:
+		return song
+
+def extract_artist(username):
+	cursor = con.cursor()
+	cursor.execute("""
+		SELECT artist FROM song_database
+		""")
+	artist_list = list(cursor.fetchall())
+	for x in range(0, len(artist_list)):
+		artist_list[x] = artist_list[x][0]
+	cursor.execute("""
+		SELECT artist FROM blacklist
+		""")
+	blacklist = list(cursor.fetchall())
+	for x in range(0, len(blacklist)):
+		blacklist[x] = blacklist[x][0]
+	username = 
 
 def get_playlists(service):
 	dict_cursor = con.cursor(MySQLdb.cursors.DictCursor)
@@ -75,7 +167,6 @@ def get_playlist_tracks(owner_id, playlist_id, playlist_name):
 				'playlist': playlist_name
 				}
 			playlist_dict.append(track_entry)
-
 	return playlist_dict
 
 def get_song_playlists(song, artist):
@@ -235,27 +326,29 @@ for playlist in playlists:
 	#recorded_list is the list of songs the database BELIEVES are currently on the playlist
 	cursor.execute("""
 		SELECT song_id FROM playlist_performance
-		WHERE playlist_id = %s AND date_removed = NULL""",
+		WHERE playlist_id = %s AND date_removed IS NULL""",
 		(playlist_id,)
 		)
 	recorded_list = list(cursor.fetchall())
 	for x in range(0, len(recorded_list)):
 		recorded_list[x] = recorded_list[x][0]
+
 	track_titles = []
 	for x in range(0, len(tracks)):
-	    track_titles.append(tracks[x]['title'])
+	    track_titles.append(unidecode(tracks[x]['title'].upper()))
 	for item in recorded_list:
+		cursor = con.cursor()
 		cursor.execute("""
 			SELECT song FROM song_database
 			WHERE song_id = %s""",
 			(item,)
 			)
-		song = str(cursor.fetchone()[0])
+		song = str(unidecode(cursor.fetchone()[0].upper()))
 		#if the song is in "tracks", the database is right
-		if song in track_titles:
+		if any(song in s for s in track_titles):
 			cursor.close()
 		#if the song isn't in "tracks", the song's been removed from the playlist
-		elif song not in track_titles:
+		else:
 			today = datetime.now()
 			cursor.execute("""
 				UPDATE playlist_performance
@@ -263,14 +356,31 @@ for playlist in playlists:
 				WHERE song_id = %s AND playlist_id = %s""",
 				(today, item, playlist_id)
 				)
-			cursor.commit()
+			con.commit()
 			cursor.close()
 
 #Get list of users
-cursor = con.cursor()
-cursor.execute("""
-	SELECT sc_id FROM tastemaker_database
-	""")
-sc_users = cursor.fetchall()
+# cursor = con.cursor()
+# cursor.execute("""
+# 	SELECT sc_id FROM tastemaker_database
+# 	WHERE sc_id IS NOT NULL
+# 	""")
+# sc_users = list(cursor.fetchall())
+# for x in range(0, len(sc_users)):
+# 	sc_users[x] = sc_users[x][0]
+
+# for x in range(0, len(sc_users)):
+# 	favorites = client.get('/users/%s/favorites' % sc_users[x])
+# 	for favorite in favorites:
+# 		song = extract_song(favorite.title)
+# 		username = favorite.user['username']
+# 		if username in 
+
+
+# 		if "RMX" or "Remix" or "Edit" or "Flip)" or "Chopped" in song:
+# 			print song
+			
+
+		
 
 con.close()
